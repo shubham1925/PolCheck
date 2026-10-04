@@ -1,0 +1,27 @@
+# Fetch pick-and-place demo suite. Families split the object's start region.
+# object_x / object_y are offsets in metres from the gripper's initial position;
+# the robot faces +x, so negative x is near the robot and positive y is its left.
+
+[suite]
+name = "pick"
+version = 1
+
+[[scenario]]
+family = "near-left"
+config = { object_x = [-0.15, 0.0], object_y = [0.0, 0.15] }
+seeds = { start = 0, count = 50 }
+
+[[scenario]]
+family = "near-right"
+config = { object_x = [-0.15, 0.0], object_y = [-0.15, 0.0] }
+seeds = { start = 0, count = 50 }
+
+[[scenario]]
+family = "far-left"
+config = { object_x = [0.0, 0.15], object_y = [0.0, 0.15] }
+seeds = { start = 0, count = 50 }
+
+[[scenario]]
+family = "far-right"
+config = { object_x = [0.0, 0.15], object_y = [-0.15, 0.0] }
+seeds = { start = 0, count = 50 }

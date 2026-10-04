@@ -1,0 +1,4 @@
+family,seed,success,failure
+near-left,0,true,
+middle,0,true,
+far-up,1,false,timeout

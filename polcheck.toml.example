@@ -1,0 +1,39 @@
+# polcheck configuration. Copy to polcheck.toml and edit.
+# Relative paths are resolved against this file's directory.
+
+store = ".polcheck"
+alpha = 0.05
+fdr_q = 0.05               # Benjamini-Hochberg false discovery rate
+min_n = 20                 # runs per family per side below which a family is INCONCLUSIVE
+min_n_tail = 100           # runs per family per side needed for a per-family p95 test
+bootstrap_resamples = 10000
+report_max_run_pages = 50
+
+[rules]                    # comparability rule severities: "warn" or "block"
+suite_ref = "block"
+scenario_set = "warn"
+simulator_version = "warn"
+physics_hash = "block"
+
+[measures.success_rate]
+threshold = 0.03
+role = "gate"
+
+[measures.sparc]
+threshold = 0.1
+role = "advisory"
+
+# [measures.task_score]    # example imported metric: needs a direction to count
+# worse = "lower"
+# threshold = 0.05
+
+[readers.tabular]          # column mapping for generic per-episode CSV / JSONL
+family = "family"
+env_seed = "seed"
+success = "success"
+# policy_seed = "policy_seed"
+# failure_reason = "failure"
+# scenario_index = "scenario"   # needed only if a family has several scenarios
+# metrics = ["task_score", "episode_length"]   # default: every other numeric column
+# simulator = { name = "isaac-sim", version = "<version>" }
+# physics_hash = "unknown"

@@ -1,0 +1,9 @@
+family,seed,success,failure,task_score,episode_length,notes
+near-left,0,true,,0.91,120,ok
+near-left,1,false,dropped,0.20,300,slipped
+near-right,0,true,,0.88,135,ok
+near-right,1,true,,,140,score missing
+far-left,0,1,,0.75,180,ok
+far-left,1,0,timeout,0.10,300,ok
+far-right,0,true,,0.80,160,ok
+far-right,1,true,,0.83,150,ok

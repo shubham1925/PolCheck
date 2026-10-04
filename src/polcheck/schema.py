@@ -6,7 +6,8 @@ milestones that produce them (M2, M4).
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+import json
+from typing import Annotated, Literal, Self
 from uuid import UUID
 
 from pydantic import (
@@ -16,6 +17,7 @@ from pydantic import (
     Field,
     JsonValue,
     StringConstraints,
+    model_validator,
 )
 
 SuiteName = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")]
@@ -62,6 +64,16 @@ class Suite(_Model):
     version: int = Field(ge=1)
     scenarios: list[Scenario] = Field(min_length=1)
 
+    @model_validator(mode="after")
+    def _no_duplicate_scenarios(self) -> Self:
+        seen: set[tuple[str, str]] = set()
+        for sc in self.scenarios:
+            key = (sc.family, json.dumps(sc.config, sort_keys=True))
+            if key in seen:
+                raise ValueError(f"family {sc.family!r} lists the same config twice")
+            seen.add(key)
+        return self
+
     @property
     def ref(self) -> str:
         return f"{self.name}@{self.version}"
@@ -106,6 +118,29 @@ class Batch(_Model):
     deterministic: bool | None = None
     """None means unknown; see the determinism helper (section 7.4)."""
     n_runs: int = Field(ge=0)
+
+
+class BatchData(_Model):
+    """A batch together with its runs. This is what readers return."""
+
+    batch: Batch
+    runs: list[Run]
+
+    @model_validator(mode="after")
+    def _runs_belong_to_batch(self) -> Self:
+        if self.batch.n_runs != len(self.runs):
+            raise ValueError(f"batch says n_runs={self.batch.n_runs} but has {len(self.runs)} runs")
+        for run in self.runs:
+            if (run.batch_id, run.suite_ref, run.policy_version) != (
+                self.batch.batch_id,
+                self.batch.suite_ref,
+                self.batch.policy_version,
+            ):
+                raise ValueError(
+                    f"run {run.run_id} does not match its batch "
+                    "(batch_id, suite_ref and policy_version must be equal)"
+                )
+        return self
 
 
 # --- 6.6 Portable batch file ------------------------------------------------

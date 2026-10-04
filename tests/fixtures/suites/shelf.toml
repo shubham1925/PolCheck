@@ -1,0 +1,19 @@
+# One family with two scenarios: tabular rows need a scenario index.
+[suite]
+name = "shelf"
+version = 1
+
+[[scenario]]
+family = "shelf"
+config = { height = 0.4 }
+seeds = { start = 0, count = 2 }
+
+[[scenario]]
+family = "shelf"
+config = { height = 0.8 }
+seeds = { start = 0, count = 2 }
+
+[[scenario]]
+family = "floor"
+config = {}
+seeds = { start = 0, count = 2 }

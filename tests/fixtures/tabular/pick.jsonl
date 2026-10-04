@@ -1,0 +1,8 @@
+{"family": "near-left", "seed": 0, "success": true, "failure": null, "task_score": 0.91, "episode_length": 120, "notes": "ok"}
+{"family": "near-left", "seed": 1, "success": false, "failure": "dropped", "task_score": 0.2, "episode_length": 300, "notes": "slipped"}
+{"family": "near-right", "seed": 0, "success": true, "failure": null, "task_score": 0.88, "episode_length": 135, "notes": "ok"}
+{"family": "near-right", "seed": 1, "success": true, "failure": null, "task_score": null, "episode_length": 140, "notes": "score missing"}
+{"family": "far-left", "seed": 0, "success": true, "failure": null, "task_score": 0.75, "episode_length": 180, "notes": "ok"}
+{"family": "far-left", "seed": 1, "success": false, "failure": "timeout", "task_score": 0.1, "episode_length": 300, "notes": "ok"}
+{"family": "far-right", "seed": 0, "success": true, "failure": null, "task_score": 0.8, "episode_length": 160, "notes": "ok"}
+{"family": "far-right", "seed": 1, "success": true, "failure": null, "task_score": 0.83, "episode_length": 150, "notes": "ok"}

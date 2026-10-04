@@ -1,0 +1,23 @@
+[suite]
+name = "pick"
+version = 1
+
+[[scenario]]
+family = "near-left"
+config = { object_x = [-0.15, 0.0], object_y = [0.0, 0.15] }
+seeds = { start = 0, count = 4 }
+
+[[scenario]]
+family = "near-right"
+config = { object_x = [-0.15, 0.0], object_y = [-0.15, 0.0] }
+seeds = { start = 0, count = 4 }
+
+[[scenario]]
+family = "far-left"
+config = { object_x = [0.0, 0.15], object_y = [0.0, 0.15] }
+seeds = { start = 0, count = 4 }
+
+[[scenario]]
+family = "far-right"
+config = { object_x = [0.0, 0.15], object_y = [-0.15, 0.0] }
+seeds = { start = 0, count = 4 }
