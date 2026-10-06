@@ -15,13 +15,14 @@ import numpy as np
 import pyarrow as pa
 from numpy.typing import ArrayLike
 
-from polcheck.schema import Batch, BatchData, Run, Scenario, SimulatorInfo
+from polcheck.comparability import detect_determinism
+from polcheck.schema import UNKNOWN, Batch, BatchData, Run, Scenario, SimulatorInfo
 from polcheck.store import CONTACT_COLUMNS, Store
 from polcheck.suite import scenario_id
 
 log = logging.getLogger(__name__)
 
-UNKNOWN_SIMULATOR = SimulatorInfo(name="unknown", version="unknown")
+UNKNOWN_SIMULATOR = SimulatorInfo(name=UNKNOWN, version=UNKNOWN)
 
 
 class RecorderError(RuntimeError):
@@ -206,7 +207,7 @@ class Recorder:
         suite: str | Path,
         *,
         simulator: SimulatorInfo = UNKNOWN_SIMULATOR,
-        physics_hash: str = "unknown",
+        physics_hash: str = UNKNOWN,
         git_sha: str | None = None,
     ) -> None:
         if not policy_version:
@@ -298,6 +299,7 @@ class Recorder:
             suite_ref=self.suite.ref,
             created_at=datetime.now(UTC),
             git_sha=self.git_sha,
+            deterministic=detect_determinism(self.runs),
             n_runs=len(self.runs),
         )
         self.store.write_batch(BatchData(batch=batch, runs=self.runs))

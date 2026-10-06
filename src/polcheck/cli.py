@@ -16,7 +16,7 @@ import typer
 
 from polcheck.config import ConfigError, load_config
 from polcheck.readers import ReaderError, get_reader
-from polcheck.schema import SimulatorInfo
+from polcheck.schema import UNKNOWN, SimulatorInfo
 from polcheck.store import Store, StoreError
 from polcheck.suite import SuiteError
 
@@ -76,7 +76,7 @@ def ingest(
         mapping = cfg.readers.tabular
         overrides: dict[str, object] = {}
         if simulator_name or simulator_version:
-            current = mapping.simulator or SimulatorInfo(name="unknown", version="unknown")
+            current = mapping.simulator or SimulatorInfo(name=UNKNOWN, version=UNKNOWN)
             overrides["simulator"] = SimulatorInfo(
                 name=simulator_name or current.name, version=simulator_version or current.version
             )

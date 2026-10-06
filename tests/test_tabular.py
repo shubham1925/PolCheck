@@ -163,3 +163,14 @@ def test_registered_as_entry_point() -> None:
     assert isinstance(get_reader("tabular"), TabularReader)
     with pytest.raises(ReaderError, match="available: native, tabular"):
         get_reader("nope")
+
+
+def test_repeated_seeds_set_determinism(tmp_path: Path) -> None:
+    same = tmp_path / "same.csv"
+    same.write_text("family,seed,success\nnear-left,0,true\nnear-left,0,true\nfar-left,1,false\n")
+    differ = tmp_path / "differ.csv"
+    differ.write_text("family,seed,success\nnear-left,0,true\nnear-left,0,false\n")
+    mapping = TabularMapping(env_seed="seed")
+    assert read(same, mapping).batch.deterministic is True
+    assert read(differ, mapping).batch.deterministic is False
+    assert read(TABULAR / "pick.csv").batch.deterministic is None

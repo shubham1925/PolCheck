@@ -8,11 +8,9 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from polcheck.schema import SimulatorInfo
+from polcheck.schema import Severity, SimulatorInfo
 
 CONFIG_FILENAME = "polcheck.toml"
-
-Severity = Literal["warn", "block"]
 
 
 class ConfigError(ValueError):

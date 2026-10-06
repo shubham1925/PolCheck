@@ -195,3 +195,22 @@ def test_context_manager_closes_and_resolves_registered_suite(store: Store) -> N
     second = Recorder(store, "pick-v2", "pick@1")
     assert second.suite == rec.suite
     assert [b.batch_id for b in store.list_batches()] == [rec.batch_id]
+
+
+@pytest.mark.parametrize(
+    ("outcomes", "expected"),
+    [
+        ([(0, True), (1, True)], None),  # no repeated seed: no evidence
+        ([(0, True), (0, True)], True),  # identical repeat
+        ([(0, True), (0, False)], False),  # repeat disagrees
+    ],
+)
+def test_close_records_determinism(
+    store: Store, outcomes: list[tuple[int, bool]], expected: bool | None
+) -> None:
+    rec = make_recorder(store)
+    for env_seed, success in outcomes:
+        with rec.run(scenario=rec.suite.scenarios[0], env_seed=env_seed) as run:
+            run.finish(success=success)
+    batch_id = rec.close()
+    assert store.read_batch_meta(batch_id).deterministic is expected

@@ -15,12 +15,12 @@ import pyarrow as pa
 import pyarrow.csv as pa_csv
 import pyarrow.json as pa_json
 
+from polcheck.comparability import detect_determinism
 from polcheck.config import Config
 from polcheck.readers.base import ReaderError
-from polcheck.schema import Batch, BatchData, Run, SimulatorInfo, Suite
+from polcheck.schema import UNKNOWN, Batch, BatchData, Run, SimulatorInfo, Suite
 from polcheck.suite import family_scenarios
 
-UNKNOWN = "unknown"
 _TRUE = {"true", "1", "yes", "y", "t"}
 _FALSE = {"false", "0", "no", "n", "f"}
 
@@ -176,6 +176,7 @@ class TabularReader:
             policy_version=policy_version,
             suite_ref=suite.ref,
             created_at=now,
+            deterministic=detect_determinism(runs),
             n_runs=len(runs),
         )
         return BatchData(batch=batch, runs=runs)

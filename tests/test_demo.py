@@ -13,6 +13,9 @@ pytest.importorskip("gymnasium_robotics")
 
 from demo.run_suite import DEFAULT_SUITE, run_suite
 from demo.scripted import ScriptedPick
+from polcheck.comparability import check
+from polcheck.config import Config
+from polcheck.schema import BatchData
 from polcheck.store import Store
 
 pytestmark = pytest.mark.demo
@@ -75,3 +78,20 @@ def test_same_seed_same_policy_is_repeatable(store: Store) -> None:
 
 def test_suite_file_is_the_documented_one() -> None:
     assert DEFAULT_SUITE.name == "pick.toml"
+
+
+def test_two_recorded_batches_are_comparable_and_paired(store: Store) -> None:
+    def record(version: str) -> BatchData:
+        batch_id = run_suite(
+            ScriptedPick(), version, store=store, seeds_per_family=3, repeat_check=2
+        )
+        return store.read_batch(batch_id)
+
+    base, cand = record("v1"), record("v1-again")
+    assert base.batch.deterministic is True
+    assert base.batch.n_runs == 4 * 3 + 2
+    result = check(base, cand, Config(min_n=3))
+    assert result.status == "comparable"
+    assert result.paired
+    assert result.issues == []
+    assert [(f.n_base, f.n_cand) for f in result.families] == [(3, 3)] * 4  # repeats counted once

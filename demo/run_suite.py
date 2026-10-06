@@ -65,19 +65,27 @@ def run_suite(
     seeds_per_family: int | None = None,
     families: Iterable[str] | None = None,
     max_steps: int = MAX_STEPS,
+    repeat_check: int = 0,
 ) -> UUID:
+    """Record the suite. `repeat_check` re-runs that many recorded seeds (spread
+    evenly over the batch) so the determinism helper has evidence to check; the
+    repeats are stored as ordinary runs with the same keys."""
     env = make_env(max_steps)
     logger = SignalLogger(env)
     wanted = set(families) if families is not None else None
     with Recorder(
         store, policy_version, suite, simulator=sim_info(), physics_hash=physics_hash(env)
     ) as rec:
-        for scenario in rec.suite.scenarios:
-            if wanted is not None and scenario.family not in wanted:
-                continue
-            for env_seed in list(scenario.seeds.seeds())[:seeds_per_family]:
-                with rec.run(scenario=scenario, env_seed=env_seed) as run:
-                    record_episode(env, logger, policy, scenario, env_seed, run, max_steps)
+        plan = [
+            (scenario, env_seed)
+            for scenario in rec.suite.scenarios
+            if wanted is None or scenario.family in wanted
+            for env_seed in list(scenario.seeds.seeds())[:seeds_per_family]
+        ]
+        repeats = plan[:: max(1, len(plan) // repeat_check)][:repeat_check] if repeat_check else []
+        for scenario, env_seed in plan + repeats:
+            with rec.run(scenario=scenario, env_seed=env_seed) as run:
+                record_episode(env, logger, policy, scenario, env_seed, run, max_steps)
     env.close()
     return rec.batch_id
 
@@ -89,6 +97,12 @@ def main() -> None:
     parser.add_argument("--suite", default=str(DEFAULT_SUITE))
     parser.add_argument("--seeds-per-family", type=int, default=None)
     parser.add_argument("--families", nargs="*", default=None)
+    parser.add_argument(
+        "--repeat-check",
+        type=int,
+        default=4,
+        help="re-run this many seeds so polcheck can verify determinism (0 to skip)",
+    )
     args = parser.parse_args()
 
     batch_id = run_suite(
@@ -98,14 +112,21 @@ def main() -> None:
         suite=args.suite,
         seeds_per_family=args.seeds_per_family,
         families=args.families,
+        repeat_check=args.repeat_check,
     )
-    runs = Store(args.store).read_batch(batch_id).runs
-    by_family: dict[str, list[bool]] = {}
-    for r in runs:
-        by_family.setdefault(r.family, []).append(r.success)
-    print(f"batch {batch_id}: {len(runs)} runs")
+    data = Store(args.store).read_batch(batch_id)
+    runs = data.runs
+    by_family: dict[str, dict[int, bool]] = {}
+    for r in runs:  # repeats share a seed, so each seed is counted once
+        by_family.setdefault(r.family, {})[r.env_seed] = r.success
+    determinism = {True: "deterministic", False: "NOT deterministic", None: "unknown"}
+    print(
+        f"batch {batch_id}: {len(runs)} runs "
+        f"(incl. {args.repeat_check} repeats; determinism: "
+        f"{determinism[data.batch.deterministic]})"
+    )
     for family, results in by_family.items():
-        print(f"  {family:<12} {sum(results)}/{len(results)} succeeded")
+        print(f"  {family:<12} {sum(results.values())}/{len(results)} succeeded")
 
 
 if __name__ == "__main__":

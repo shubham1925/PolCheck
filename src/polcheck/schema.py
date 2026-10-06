@@ -1,7 +1,6 @@
 """Pydantic models for the polcheck data model (BUILD_PLAN section 6).
 
-Comparison-side models (comparability and test results) are added with the
-milestones that produce them (M2, M4).
+plus the comparability result (section 7.4). Test results are added in M4.
 """
 
 from __future__ import annotations
@@ -35,6 +34,13 @@ FiniteFloat = Annotated[float, Field(allow_inf_nan=False)]
 """Metric values must be finite. An undefined measure is absent, never NaN."""
 
 RunSource = Literal["native", "tabular", "arena"]
+
+Severity = Literal["warn", "block"]
+
+ComparabilityStatus = Literal["comparable", "partial", "not_comparable"]
+
+UNKNOWN = "unknown"
+"""Simulator name/version or physics hash that the source did not record."""
 
 
 class _Model(BaseModel):
@@ -162,3 +168,39 @@ class BatchManifest(_Model):
     contents: ManifestContents = Field(default_factory=ManifestContents)
     is_baseline: bool = False
     """True if the batch was its suite's baseline at export time."""
+
+
+# --- 7.4 Comparability ------------------------------------------------------
+
+
+class Issue(_Model):
+    rule: str
+    """`suite_ref`, `scenario_set`, `simulator_version`, `physics_hash` or `min_n`."""
+    severity: Severity
+    message: str
+    """What differs and what to do about it."""
+
+
+class FamilyCounts(_Model):
+    family: str
+    n_base: int
+    n_cand: int
+
+
+class ComparabilityResult(_Model):
+    status: ComparabilityStatus
+    paired: bool
+    pairing_reason: str
+    """Why the comparison is or is not paired, in words for the report."""
+    matched_keys: int
+    """`(scenario_id, env_seed)` keys present in both batches (shared scenarios only)."""
+    key_overlap: float = Field(ge=0, le=1)
+    """`matched_keys` divided by the number of distinct keys across both batches."""
+    base_deterministic: bool | None
+    cand_deterministic: bool | None
+    shared_scenarios: list[ScenarioId]
+    families: list[FamilyCounts]
+    """Run counts per family over the shared scenarios, one entry per family."""
+    low_n_families: list[str]
+    """Families below `min_n` on either side; M4 reports these as INCONCLUSIVE."""
+    issues: list[Issue]
