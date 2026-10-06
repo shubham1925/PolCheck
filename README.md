@@ -41,6 +41,10 @@ uv run --extra demo python -m demo.watch --family far-left --seed 3 --speed 0.2
 uv run --extra demo python -m demo.watch --family near-right --seed 7 --video ep.mp4
 ```
 
+`--grasp-height` (metres, default 0) raises the scripted grasp point to make a weaker policy: 0.033 fails about 10% of episodes and 0.04 nearly all of them. Pass the same `ScriptedPick(grasp_height=...)` to `demo.run_suite.run_suite` to record that variant.
+
+The episode is simulated in full before anything is drawn, then replayed. Rendering mid-episode perturbs the physics enough to flip borderline outcomes, so this is what keeps the viewer in agreement with recorded runs.
+
 `--family` is one of the four families above and `--seed` is 0–49. The script prints the outcome, steps taken and final distance to the goal. The cube is the black box and the goal is the red dot.
 
 The live window uses MuJoCo's GLFW backend and video uses EGL. Set `MUJOCO_GL` to override the backend. Replaying runs already recorded in the store (`polcheck render RUN_ID`) comes later, in M8.

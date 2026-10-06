@@ -2,6 +2,7 @@
 
     uv run --extra demo python -m demo.watch --family far-left --seed 3
     uv run --extra demo python -m demo.watch --family near-right --seed 7 --video ep.mp4
+    uv run --extra demo python -m demo.watch --family far-left --seed 3 --grasp-height 0.02
 
 Nothing is recorded to the polcheck store; use demo.run_suite for that.
 """
@@ -26,6 +27,12 @@ def main() -> None:
     parser.add_argument(
         "--speed", type=float, default=0.5, help="live playback speed (1 = real time)"
     )
+    parser.add_argument(
+        "--grasp-height",
+        type=float,
+        default=0.0,
+        help="grasp point above the object's centre in metres; e.g. 0.02 for the weak variant",
+    )
     args = parser.parse_args()
 
     # Pick the GL backend before MuJoCo is imported: EGL renders off-screen for
@@ -33,6 +40,7 @@ def main() -> None:
     os.environ.setdefault("MUJOCO_GL", "egl" if args.video else "glfw")
 
     import gymnasium as gym
+    import mujoco
     import numpy as np
 
     from demo.envs import ENV_ID, MAX_STEPS, reset_to_scenario
@@ -49,22 +57,41 @@ def main() -> None:
         max_episode_steps=MAX_STEPS,
         render_mode="rgb_array" if args.video else "human",
     )
-    policy = ScriptedPick()
+    policy = ScriptedPick(grasp_height=args.grasp_height)
     obs = reset_to_scenario(env, scenarios[0], args.seed)
     policy.reset()
-    dt = env.unwrapped.dt  # type: ignore[attr-defined]
-    frames = [env.render()] if args.video else []
+    sim = env.unwrapped
+    dt = sim.dt  # type: ignore[attr-defined]
+    model, data = sim.model, sim.data  # type: ignore[attr-defined]
 
+    # Simulate the whole episode before rendering anything: Fetch's render
+    # callback calls mj_forward, which perturbs the physics enough to flip
+    # borderline episodes. Saving each step's state and replaying it keeps the
+    # outcome identical to an unrendered demo.run_suite run.
+    spec = mujoco.mjtState.mjSTATE_INTEGRATION
+    state = np.empty(mujoco.mj_stateSize(model, spec))
+
+    def snapshot() -> np.ndarray:
+        mujoco.mj_getState(model, data, state, spec)
+        return state.copy()
+
+    states = [snapshot()]
     success, steps = False, 0
     while steps < MAX_STEPS and not success:
         obs, _, _, _, info = env.step(policy.act(obs))
         steps += 1
+        states.append(snapshot())
+        success = bool(info["is_success"])
+
+    frames = []
+    for s in states:
+        mujoco.mj_setState(model, data, s, spec)
+        mujoco.mj_forward(model, data)
         if args.video:
             frames.append(env.render())
         else:
             env.render()
             time.sleep(dt / args.speed)
-        success = bool(info["is_success"])
 
     distance = float(np.linalg.norm(obs["achieved_goal"] - obs["desired_goal"]))
     outcome = "success" if success else "timeout"
