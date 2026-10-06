@@ -11,7 +11,7 @@ repos:
         name: ruff format
         entry: uv run ruff format
         language: system
-        types: [python]
+        types_or: [python, markdown]  # ruff also formats Python code blocks in Markdown, and CI checks them
       - id: mypy
         name: mypy src
         entry: uv run mypy src

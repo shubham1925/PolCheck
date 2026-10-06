@@ -1,0 +1,34 @@
+# Fetch pick-and-place demo suite, version 2 (the default; see DECISIONS.md D26).
+#
+# Versus pick@1: start regions are 1.5x wider (offsets up to 22.5 cm), which puts
+# the far edge near the arm's reach, and the policy sees the object through 12 mm
+# of perception noise. The object also starts at least 10 cm from the goal, so no
+# episode is solved without being picked up. The scripted controller then succeeds
+# on ~95% of seeds instead of 100%, with the failures in the far-* families.
+#
+# object_x / object_y are offsets in metres from the gripper's initial position;
+# the robot faces +x, so negative x is near the robot and positive y is its left.
+
+[suite]
+name = "pick"
+version = 2
+
+[[scenario]]
+family = "near-left"
+config = { object_x = [-0.225, 0.0], object_y = [0.0, 0.225], min_goal_distance = 0.1, perception_noise = 0.012 }
+seeds = { start = 0, count = 50 }
+
+[[scenario]]
+family = "near-right"
+config = { object_x = [-0.225, 0.0], object_y = [-0.225, 0.0], min_goal_distance = 0.1, perception_noise = 0.012 }
+seeds = { start = 0, count = 50 }
+
+[[scenario]]
+family = "far-left"
+config = { object_x = [0.0, 0.225], object_y = [0.0, 0.225], min_goal_distance = 0.1, perception_noise = 0.012 }
+seeds = { start = 0, count = 50 }
+
+[[scenario]]
+family = "far-right"
+config = { object_x = [0.0, 0.225], object_y = [-0.225, 0.0], min_goal_distance = 0.1, perception_noise = 0.012 }
+seeds = { start = 0, count = 50 }

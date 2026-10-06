@@ -1,4 +1,4 @@
-# Fetch pick-and-place demo suite. Families split the object's start region.
+# Fetch pick-and-place demo suite, version 1. Kept for reference; the default is pick2.toml.
 # object_x / object_y are offsets in metres from the gripper's initial position;
 # the robot faces +x, so negative x is near the robot and positive y is its left.
 

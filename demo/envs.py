@@ -5,6 +5,13 @@ Scenario config keys (interpreted only here):
 - `object_x`, `object_y`: `[low, high]` ranges for the object's start position,
   as offsets in metres from the gripper's initial position. The robot faces +x,
   so negative x is near the robot and positive y is to its left.
+- `min_goal_distance` (optional, metres, default 0): the object's start is
+  redrawn until it is at least this far (in x-y) from the goal. Fetch samples
+  the goal independently, so without this a goal can land next to the object
+  and the episode "succeeds" without the arm touching anything.
+- `perception_noise` (optional, metres, default 0): standard deviation of the
+  error in the object position the policy sees. It stands in for a camera:
+  part of the environment, the same for every policy version. See `Perception`.
 """
 
 from __future__ import annotations
@@ -83,15 +90,57 @@ def reset_to_scenario(
     sim = env.unwrapped
     model, data = sim.model, sim.data  # type: ignore[attr-defined]
     rng = np.random.default_rng(env_seed)
-    offset = np.array(
-        [rng.uniform(*_range(scenario, "object_x")), rng.uniform(*_range(scenario, "object_y"))]
-    )
+    x_range, y_range = _range(scenario, "object_x"), _range(scenario, "object_y")
+    min_goal_distance = _number(scenario, "min_goal_distance")
+    origin = np.asarray(sim.initial_gripper_xpos[:2])  # type: ignore[attr-defined]
+    goal_xy = np.asarray(sim.goal[:2])  # type: ignore[attr-defined]
+    for _ in range(1000):
+        xy = origin + np.array([rng.uniform(*x_range), rng.uniform(*y_range)])
+        if np.linalg.norm(xy - goal_xy) >= min_goal_distance:
+            break
+    else:
+        raise ValueError(
+            f"scenario {scenario.family!r}, env_seed {env_seed}: no start position at least "
+            f"{min_goal_distance} m from the goal; widen the region or lower min_goal_distance"
+        )
     qpos = sim._utils.get_joint_qpos(model, data, "object0:joint").copy()  # type: ignore[attr-defined]
-    qpos[:2] = sim.initial_gripper_xpos[:2] + offset  # type: ignore[attr-defined]
+    qpos[:2] = xy
     sim._utils.set_joint_qpos(model, data, "object0:joint", qpos)  # type: ignore[attr-defined]
     mujoco.mj_forward(model, data)
     obs: dict[str, np.ndarray] = sim._get_obs()  # type: ignore[attr-defined]
     return obs
+
+
+PERCEPTION_STREAM = 1
+"""Second seed word for the perception generator, so it is independent of placement."""
+
+
+class Perception:
+    """What the policy sees: the true observation with the object position perturbed.
+
+    Each episode draws a fixed bias (standard deviation `sigma`, like a calibration
+    error) plus fresh per-step jitter (`sigma / 2`). Seeded by `env_seed`, so the
+    same seed always sees the same errors and runs stay deterministic. The env's
+    own success check uses the true object position.
+    """
+
+    def __init__(self, sigma: float, env_seed: int) -> None:
+        self.sigma = sigma
+        self._rng = np.random.default_rng([env_seed, PERCEPTION_STREAM])
+        self._bias = self._rng.normal(0.0, sigma, 3) if sigma > 0 else np.zeros(3)
+
+    @classmethod
+    def for_scenario(cls, scenario: Scenario, env_seed: int) -> Perception:
+        return cls(_number(scenario, "perception_noise"), env_seed)
+
+    def __call__(self, obs: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+        if self.sigma == 0:
+            return obs
+        error = self._bias + self._rng.normal(0.0, self.sigma / 2, 3)
+        seen = {key: value.copy() for key, value in obs.items()}
+        seen["observation"][3:6] += error  # object position
+        seen["observation"][6:9] += error  # object position relative to the gripper
+        return seen
 
 
 class SignalLogger:
@@ -188,6 +237,16 @@ def _range(scenario: Scenario, key: str) -> tuple[float, float]:
         raise ValueError(f"scenario {scenario.family!r}: {key} must be [low, high], got {value!r}")
     low, high = float(value[0]), float(value[1])  # type: ignore[arg-type]
     return low, high
+
+
+def _number(scenario: Scenario, key: str) -> float:
+    """An optional non-negative number from the scenario config (default 0)."""
+    value = scenario.config.get(key, 0.0)
+    if not isinstance(value, int | float) or isinstance(value, bool) or value < 0:
+        raise ValueError(
+            f"scenario {scenario.family!r}: {key} must be a number >= 0, got {value!r}"
+        )
+    return float(value)
 
 
 def _descends_from(model: mujoco.MjModel, body: int, ancestor: int) -> bool:

@@ -14,9 +14,97 @@ uv run mypy src
 uv run pre-commit install   # optional: run the checks on every commit
 ```
 
+## Recording your own runs
+
+polcheck never runs your simulator. You run your evaluation as usual and hand polcheck the results, in one of two ways.
+
+### Option A: record time-series with the `Recorder`
+
+Use this when you can read the robot's state each step. It enables every measure, including smoothness, contact force and clearance.
+
+**1. Describe your scenarios in a suite file.** `config` is free-form; only your own code interprets it.
+
+```toml
+[suite]
+name = "shelf-pick"
+version = 1
+
+[[scenario]]
+family = "top-shelf"
+config = { shelf_height = 1.4, clutter = 3 }
+seeds = { start = 0, count = 50 }
+```
+
+**2. Wrap your evaluation loop.** You write the part that reads your simulator's state (an "adapter"); polcheck only sees plain arrays. `demo/envs.py`'s `SignalLogger` is a worked example for MuJoCo.
+
+```python
+from polcheck.recorder import Contact, Recorder
+from polcheck.schema import SimulatorInfo
+
+rec = Recorder(
+    ".polcheck",  # store directory, created if missing
+    "shelf-v14",  # the policy version being evaluated
+    "suites/shelf.toml",  # suite file; afterwards "shelf-pick@1" also works
+    simulator=SimulatorInfo(name="isaac-sim", version="4.5"),
+    physics_hash="...",  # any string that changes when physics settings change
+)
+
+for scenario in rec.suite.scenarios:
+    for env_seed in scenario.seeds.seeds():
+        with rec.run(scenario=scenario, env_seed=env_seed) as run:
+            ...  # reset your simulator from scenario.config and env_seed
+            while not done:
+                ...  # step your policy and simulator
+                run.log(
+                    t=t,
+                    joint_pos=q,
+                    joint_vel=dq,
+                    ee_pos=p,
+                    ee_quat=quat,
+                    objects={"box": (box_pos, box_quat)},
+                    clearance=min_dist,
+                )
+                run.log_contacts(t=t, contacts=[Contact("finger_l", "box", 3.2, True)])
+            run.finish(
+                success=ok, failure_reason=None if ok else "timeout", metrics={"task_score": score}
+            )  # optional extra numbers you already have
+
+batch_id = rec.close()
+```
+
+Signals you can log (all optional; leave out what you can't provide, and measures that need it are reported as skipped):
+
+| Argument | Shape | Meaning |
+|---|---|---|
+| `t` | scalar | time in seconds; must increase every step |
+| `joint_pos`, `joint_vel`, `joint_torque` | n joints | rad, rad/s, N·m |
+| `ee_pos` | 3 | end-effector position, metres, world frame |
+| `ee_quat` | 4 | end-effector orientation, **w, x, y, z** |
+| `objects` | name → (pos 3, quat 4) | tracked objects, same conventions |
+| `clearance` | scalar | minimum distance from the robot to its surroundings, metres |
+| `qpos` | n | full MuJoCo state, only for replay video |
+
+Contacts are `Contact(geom_a, geom_b, force_norm, intended)`. Mark contacts the task requires (e.g. fingers on the object) as `intended=True`; the rest count as unintended contact.
+
+Every step of a run must log the same signals. If your code raises inside a run, that run is stored as failed and the batch continues. To let polcheck compare seed-by-seed (more sensitive), re-run a few seeds within the batch so it can confirm your setup is deterministic (see `--repeat-check` in `demo/run_suite.py`).
+
+### Option B: import per-episode results from a file
+
+If your evaluation tool already writes one row per episode, import it directly. Map your column names in `polcheck.toml` (see `polcheck.toml.example`):
+
+```sh
+uv run polcheck ingest results.csv --reader tabular --policy shelf-v14 --suite suites/shelf.toml
+```
+
+CSV and JSONL work. Without time-series, only success rate and your own metric columns can be compared.
+
+### Then: compare
+
+Comparing a candidate batch against a baseline (`polcheck compare`) is not built yet; it arrives in milestones M4 (statistics) and M7 (CLI and reports).
+
 ## Demo (MuJoCo)
 
-A scripted controller picks a cube and places it at a goal in Gymnasium-Robotics' Fetch pick-and-place. The suite in `demo/suites/pick.toml` has four families by object start region (`near-left`, `near-right`, `far-left`, `far-right`), 50 seeds each.
+A scripted controller picks a cube and places it at a goal in Gymnasium-Robotics' Fetch pick-and-place. The default suite, `demo/suites/pick2.toml` (`pick@2`), has four families by object start region (`near-left`, `near-right`, `far-left`, `far-right`), 50 seeds each. The policy sees the object through 12 mm of simulated perception noise and far starting positions are near the arm's reach, so the scripted controller succeeds on about 95% of seeds, not all of them. `pick.toml` (`pick@1`) is the easier original, kept for reference.
 
 ```sh
 uv sync --extra demo

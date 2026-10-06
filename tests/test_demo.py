@@ -11,12 +11,16 @@ import pytest
 
 pytest.importorskip("gymnasium_robotics")
 
+import numpy as np
+
+from demo.envs import Perception
 from demo.run_suite import DEFAULT_SUITE, run_suite
 from demo.scripted import ScriptedPick
 from polcheck.comparability import check
 from polcheck.config import Config
-from polcheck.schema import BatchData
+from polcheck.schema import BatchData, Scenario, SeedRange
 from polcheck.store import Store
+from polcheck.suite import load_suite
 
 pytestmark = pytest.mark.demo
 
@@ -76,8 +80,46 @@ def test_same_seed_same_policy_is_repeatable(store: Store) -> None:
     assert _signals(store, first) == _signals(store, second)
 
 
-def test_suite_file_is_the_documented_one() -> None:
-    assert DEFAULT_SUITE.name == "pick.toml"
+def test_default_suite_is_pick_v2() -> None:
+    suite = load_suite(DEFAULT_SUITE)
+    assert suite.ref == "pick@2"
+    assert {sc.config["perception_noise"] for sc in suite.scenarios} == {0.012}
+
+
+def _obs() -> dict[str, np.ndarray]:
+    return {
+        "observation": np.arange(25, dtype=np.float64),
+        "achieved_goal": np.zeros(3),
+        "desired_goal": np.ones(3),
+    }
+
+
+def test_perception_is_seeded_and_only_moves_the_object() -> None:
+    a, b, c = Perception(0.012, 7), Perception(0.012, 7), Perception(0.012, 8)
+    seen_a, seen_b, seen_c = a(_obs()), b(_obs()), c(_obs())
+    assert np.array_equal(seen_a["observation"], seen_b["observation"])  # same seed, same error
+    assert not np.array_equal(seen_a["observation"], seen_c["observation"])
+    error = seen_a["observation"] - _obs()["observation"]
+    assert np.array_equal(error[3:6], error[6:9])  # position and relative position agree
+    assert np.all(error[3:6] != 0)  # the object position is perturbed
+    assert np.count_nonzero(np.delete(error, range(3, 9))) == 0  # nothing else touched
+    assert np.array_equal(seen_a["achieved_goal"], np.zeros(3))  # success uses the truth
+
+
+def test_zero_noise_passes_observation_through() -> None:
+    obs = _obs()
+    assert Perception(0.0, 1)(obs) is obs
+
+
+@pytest.mark.parametrize("bad", [-0.01, "loud", True])
+def test_invalid_perception_noise(bad: object) -> None:
+    scenario = Scenario(
+        family="f",
+        config={"object_x": [0, 0], "object_y": [0, 0], "perception_noise": bad},  # type: ignore[dict-item]
+        seeds=SeedRange(start=0, count=1),
+    )
+    with pytest.raises(ValueError, match="perception_noise"):
+        Perception.for_scenario(scenario, 0)
 
 
 def test_two_recorded_batches_are_comparable_and_paired(store: Store) -> None:

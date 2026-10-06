@@ -14,14 +14,21 @@ from uuid import UUID
 import gymnasium as gym
 import numpy as np
 
-from demo.envs import MAX_STEPS, SignalLogger, make_env, physics_hash, reset_to_scenario
+from demo.envs import (
+    MAX_STEPS,
+    Perception,
+    SignalLogger,
+    make_env,
+    physics_hash,
+    reset_to_scenario,
+)
 from demo.envs import simulator_info as sim_info
 from demo.scripted import ScriptedPick
 from polcheck.recorder import Recorder, RunContext
 from polcheck.schema import Scenario
 from polcheck.store import Store
 
-DEFAULT_SUITE = Path(__file__).parent / "suites" / "pick.toml"
+DEFAULT_SUITE = Path(__file__).parent / "suites" / "pick2.toml"
 
 
 class Policy(Protocol):
@@ -39,11 +46,12 @@ def record_episode(
     max_steps: int = MAX_STEPS,
 ) -> None:
     obs = reset_to_scenario(env, scenario, env_seed)
+    perceive = Perception.for_scenario(scenario, env_seed)
     policy.reset()
     logger.log(run)
     success = False
     for _ in range(max_steps):
-        obs, _, _, _, info = env.step(policy.act(obs))
+        obs, _, _, _, info = env.step(policy.act(perceive(obs)))
         logger.log(run)
         success = bool(info["is_success"])
         if success:

@@ -2,7 +2,7 @@
 
     uv run --extra demo python -m demo.watch --family far-left --seed 3
     uv run --extra demo python -m demo.watch --family near-right --seed 7 --video ep.mp4
-    uv run --extra demo python -m demo.watch --family far-left --seed 3 --grasp-height 0.02
+    uv run --extra demo python -m demo.watch --family far-left --seed 3 --grasp-height 0.033
 
 Nothing is recorded to the polcheck store; use demo.run_suite for that.
 """
@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 
 # Not imported from demo.run_suite: that would import MuJoCo before MUJOCO_GL is set.
-DEFAULT_SUITE = Path(__file__).parent / "suites" / "pick.toml"
+DEFAULT_SUITE = Path(__file__).parent / "suites" / "pick2.toml"
 
 
 def main() -> None:
@@ -31,7 +31,7 @@ def main() -> None:
         "--grasp-height",
         type=float,
         default=0.0,
-        help="grasp point above the object's centre in metres; e.g. 0.02 for the weak variant",
+        help="grasp point above the object's centre in metres; e.g. 0.033 fails about 10%%",
     )
     args = parser.parse_args()
 
@@ -43,7 +43,7 @@ def main() -> None:
     import mujoco
     import numpy as np
 
-    from demo.envs import ENV_ID, MAX_STEPS, reset_to_scenario
+    from demo.envs import ENV_ID, MAX_STEPS, Perception, reset_to_scenario
     from demo.scripted import ScriptedPick
     from polcheck.suite import load_suite
 
@@ -59,6 +59,7 @@ def main() -> None:
     )
     policy = ScriptedPick(grasp_height=args.grasp_height)
     obs = reset_to_scenario(env, scenarios[0], args.seed)
+    perceive = Perception.for_scenario(scenarios[0], args.seed)
     policy.reset()
     sim = env.unwrapped
     dt = sim.dt  # type: ignore[attr-defined]
@@ -78,7 +79,7 @@ def main() -> None:
     states = [snapshot()]
     success, steps = False, 0
     while steps < MAX_STEPS and not success:
-        obs, _, _, _, info = env.step(policy.act(obs))
+        obs, _, _, _, info = env.step(policy.act(perceive(obs)))
         steps += 1
         states.append(snapshot())
         success = bool(info["is_success"])
