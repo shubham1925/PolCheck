@@ -6,6 +6,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
 from polcheck.schema import Batch, BatchData, Run, SimulatorInfo
@@ -41,7 +42,8 @@ def make_batch_data(
             # metrics differ between runs, and one run has none
             metrics={} if i == 1 else {"task_time": 5.0 + i / 7, "score": i * 0.1},
             source="native",
-            has_timeseries=False,
+            has_timeseries=i != 0,
+            sample_rate_hz=None if i == 0 else 25.0 * i,
             # a non-UTC timezone must come back as the same instant
             started_at=(T0 + timedelta(seconds=i)).astimezone(timezone(timedelta(hours=2))),
         )
@@ -133,6 +135,20 @@ def test_reindex_restores_all_queries(store: Store) -> None:
     # A missing index is also rebuilt on first use.
     store.index_path.unlink()
     assert _query_snapshot(store) == before
+
+
+def test_batch_without_sample_rate_column_still_reads(store: Store) -> None:
+    """Batches written before runs stored `sample_rate_hz` read back as None."""
+    store.register_suite(PICK_SUITE)
+    data = make_batch_data()
+    store.write_batch(data)
+    path = store.batch_dir(data.batch.batch_id) / "runs.parquet"
+    table = pq.read_table(path)
+    pq.write_table(table.drop_columns(["sample_rate_hz"]), path)
+
+    assert all(r.sample_rate_hz is None for r in store.read_batch(data.batch.batch_id).runs)
+    assert store.reindex() == 1
+    assert store.query("SELECT count(*) FROM runs WHERE sample_rate_hz IS NULL") == [(4,)]
 
 
 def test_reindex_ignores_incomplete_batches(store: Store) -> None:

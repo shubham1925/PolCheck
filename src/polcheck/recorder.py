@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -23,6 +24,11 @@ from polcheck.suite import scenario_id
 log = logging.getLogger(__name__)
 
 UNKNOWN_SIMULATOR = SimulatorInfo(name=UNKNOWN, version=UNKNOWN)
+
+SIGNAL_PREFIX = "sig."
+"""Column prefix for custom signals passed to `RunContext.log(signals=...)`."""
+
+_SIGNAL_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
 
 class RecorderError(RuntimeError):
@@ -55,8 +61,12 @@ def flatten_step(
     objects: Mapping[str, tuple[ArrayLike, ArrayLike]] | None = None,
     clearance: float | None = None,
     qpos: ArrayLike | None = None,
+    signals: Mapping[str, float | ArrayLike] | None = None,
 ) -> dict[str, float]:
-    """Flatten one step's signals into the column names of section 6.4."""
+    """Flatten one step's signals into the column names of section 6.4.
+
+    Custom `signals` become `sig.<name>` (scalars) or `sig.<name>.<i>` (1-D arrays).
+    """
     row: dict[str, float] = {}
     for prefix, joint_values in (
         ("joint_pos", joint_pos),
@@ -87,6 +97,18 @@ def flatten_step(
     if qpos is not None:
         for i, v in enumerate(_vector("qpos", qpos)):
             row[f"qpos.{i}"] = float(v)
+    for name, value in (signals or {}).items():
+        if not _SIGNAL_NAME.match(name):
+            raise RecorderError(
+                f"signal name {name!r} must start with a letter and contain only "
+                "letters, digits and underscores"
+            )
+        arr = np.asarray(value, dtype=np.float64)
+        if arr.ndim == 0:
+            row[f"{SIGNAL_PREFIX}{name}"] = float(arr)
+        else:
+            for i, v in enumerate(_vector(f"signals[{name!r}]", arr)):
+                row[f"{SIGNAL_PREFIX}{name}.{i}"] = float(v)
     return row
 
 
@@ -111,6 +133,7 @@ class RunContext:
         self.finished = False
         self._columns: dict[str, list[float]] | None = None
         self._contacts: list[tuple[float, Contact]] = []
+        self._contacts_tracked = False
 
     def log(
         self,
@@ -124,8 +147,13 @@ class RunContext:
         objects: Mapping[str, tuple[ArrayLike, ArrayLike]] | None = None,
         clearance: float | None = None,
         qpos: ArrayLike | None = None,
+        signals: Mapping[str, float | ArrayLike] | None = None,
     ) -> None:
-        """Buffer one control step. Every step of a run must log the same signals."""
+        """Buffer one control step. Every step of a run must log the same signals.
+
+        `signals` holds custom signals beyond the standard ones (e.g. a force
+        sensor), stored as `sig.<name>` columns for custom measures to use.
+        """
         self._check_open()
         row = {"t": float(t)} | flatten_step(
             joint_pos=joint_pos,
@@ -136,6 +164,7 @@ class RunContext:
             objects=objects,
             clearance=clearance,
             qpos=qpos,
+            signals=signals,
         )
         if self._columns is None:
             self._columns = {key: [] for key in row}
@@ -153,7 +182,12 @@ class RunContext:
     def log_contacts(
         self, *, t: float, contacts: Iterable[Contact | tuple[str, str, float, bool]]
     ) -> None:
+        """Record the contacts at time `t`. Call it every step, even with no
+        contacts: a run that called it is stored with a (possibly empty) contacts
+        table, which tells measures "no contact happened" rather than "contacts
+        were not tracked"."""
         self._check_open()
+        self._contacts_tracked = True
         for c in contacts:
             contact = Contact(*c)
             self._contacts.append((float(t), contact))
@@ -173,13 +207,19 @@ class RunContext:
         if self.finished:
             raise RecorderError(f"run {self.run_id} is already finished")
 
+    def sample_rate_hz(self) -> float | None:
+        """1 / median time step, or None with fewer than two samples."""
+        if self._columns is None or len(self._columns["t"]) < 2:
+            return None
+        return float(1.0 / np.median(np.diff(self._columns["t"])))
+
     def timeseries_table(self) -> pa.Table | None:
         if self._columns is None:
             return None
         return pa.table({k: pa.array(v, pa.float64()) for k, v in self._columns.items()})
 
     def contacts_table(self) -> pa.Table | None:
-        if not self._contacts:
+        if not self._contacts_tracked:
             return None
         return pa.table(
             {
@@ -279,6 +319,7 @@ class Recorder:
             metrics=dict(metrics or {}),
             source="native",
             has_timeseries=ts is not None,
+            sample_rate_hz=ctx.sample_rate_hz(),
             started_at=ctx.started_at,
         )
         if ts is not None:

@@ -15,6 +15,7 @@ from typing import Annotated, NoReturn
 import typer
 
 from polcheck.config import ConfigError, load_config
+from polcheck.measures import MeasureError, MeasureSpec, load_registry
 from polcheck.readers import ReaderError, get_reader
 from polcheck.schema import UNKNOWN, SimulatorInfo
 from polcheck.store import Store, StoreError
@@ -35,7 +36,7 @@ ConfigOption = Annotated[
     typer.Option("--config", help="Path to polcheck.toml (default: ./polcheck.toml if present)."),
 ]
 
-_USER_ERRORS = (ConfigError, ReaderError, StoreError, SuiteError)
+_USER_ERRORS = (ConfigError, MeasureError, ReaderError, StoreError, SuiteError)
 
 
 def _fail(message: str) -> NoReturn:
@@ -97,6 +98,44 @@ def ingest(
         f"Ingested {data.batch.n_runs} runs as batch {data.batch.batch_id} "
         f"(policy {policy}, suite {suite_model.ref})"
     )
+
+
+measures_app = typer.Typer(help="Inspect measures.", no_args_is_help=True)
+app.add_typer(measures_app, name="measures")
+
+
+def _measure_row(spec: MeasureSpec) -> list[str]:
+    threshold = "-" if spec.threshold is None else f"{spec.threshold:g}"
+    unit = f" {spec.unit}" if spec.unit and spec.threshold is not None else ""
+    worse = f"{spec.worse} is worse" if spec.worse else "-"
+    notes = []
+    if spec.success_only:
+        notes.append("successful runs only")
+    if not spec.configured:
+        notes.append("unconfigured: set worse and threshold to use it")
+    return [spec.name, worse, threshold + unit, spec.role, spec.source, "; ".join(notes)]
+
+
+@measures_app.command("list")
+def measures_list(config: ConfigOption = None) -> None:
+    """List every measure with its direction, threshold, role and source."""
+    try:
+        cfg = load_config(config)
+        registry = load_registry(cfg)
+    except _USER_ERRORS as exc:
+        _fail(str(exc))
+    specs = registry.specs() + registry.imported(registry.config_only())
+    rows = [["MEASURE", "DIRECTION", "THRESHOLD", "ROLE", "SOURCE", "NOTES"]]
+    rows += [_measure_row(spec) for spec in specs]
+    widths = [max(len(row[i]) for row in rows) for i in range(len(rows[0]))]
+    for row in rows:
+        typer.echo("  ".join(cell.ljust(w) for cell, w in zip(row, widths, strict=True)).rstrip())
+    imported = [s.name for s in specs if s.source == "imported"]
+    if imported:
+        typer.echo(
+            f"\nImported metrics configured in polcheck.toml: {', '.join(imported)}. They "
+            "are compared only if a batch's runs carry a metric with that name."
+        )
 
 
 def main() -> None:

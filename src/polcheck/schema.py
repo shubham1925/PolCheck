@@ -33,6 +33,8 @@ NonEmptyStr = Annotated[str, StringConstraints(min_length=1)]
 FiniteFloat = Annotated[float, Field(allow_inf_nan=False)]
 """Metric values must be finite. An undefined measure is absent, never NaN."""
 
+PositiveFloat = Annotated[float, Field(gt=0, allow_inf_nan=False)]
+
 RunSource = Literal["native", "tabular", "arena"]
 
 Severity = Literal["warn", "block"]
@@ -109,6 +111,9 @@ class Run(_Model):
     metrics: dict[str, FiniteFloat] = Field(default_factory=dict)
     source: RunSource
     has_timeseries: bool
+    sample_rate_hz: PositiveFloat | None = None
+    """1 / median time step of the time-series. None without time-series, with
+    fewer than two samples, or for runs recorded before polcheck stored it."""
     started_at: AwareDatetime
 
 

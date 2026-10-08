@@ -137,3 +137,23 @@ def test_two_recorded_batches_are_comparable_and_paired(store: Store) -> None:
     assert result.paired
     assert result.issues == []
     assert [(f.n_base, f.n_cand) for f in result.families] == [(3, 3)] * 4  # repeats counted once
+
+
+def test_builtin_measures_on_recorded_runs(store: Store) -> None:
+    from polcheck.measures import load_registry
+    from polcheck.measures.compute import measure_batch
+
+    batch_id = run_suite(ScriptedPick(), "v1", store=store, seeds_per_family=3)
+    data = store.read_batch(batch_id)
+    results = measure_batch(store, data, load_suite(DEFAULT_SUITE), load_registry(Config()))
+    for name in (
+        "sparc",
+        "log_dimensionless_jerk",
+        "peak_unintended_contact_force",
+        "min_clearance",
+        "hesitation_time",
+    ):
+        assert len(results[name].defined()) == data.batch.n_runs, results[name].skipped
+    successes = sum(r.success for r in data.runs)
+    assert len(results["task_time"].defined()) == successes
+    assert results["final_goal_distance"].origin == "imported"  # recorded via finish(metrics=)

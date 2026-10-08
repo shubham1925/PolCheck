@@ -8,19 +8,46 @@ min_n = 20                 # runs per family per side below which a family is IN
 min_n_tail = 100           # runs per family per side needed for a per-family p95 test
 bootstrap_resamples = 10000
 report_max_run_pages = 50
+measure_paths = []         # Python files with custom @measure functions, e.g. ["my_measures.py"]
 
 [rules]                    # comparability rule severities: "warn" or "block"
 suite_ref = "block"
 scenario_set = "warn"
 simulator_version = "warn"
 physics_hash = "block"
+sample_rate = "warn"        # time-series sampling rates differ; affects time-series measures only
 
-[measures.success_rate]
+# Built-in measures and their defaults (DECISIONS.md D27). threshold is the
+# smallest change, in the measure's own units, that counts as a regression.
+# role: "gate" measures can make a comparison INCONCLUSIVE; "advisory" ones can
+# flag a regression but never block on missing evidence.
+
+[measures.success_rate]           # fraction of runs; lower is worse
 threshold = 0.03
 role = "gate"
 
-[measures.sparc]
+[measures.sparc]                  # smoothness (spectral arc length); lower is worse
 threshold = 0.1
+role = "advisory"
+
+[measures.log_dimensionless_jerk] # jerkiness, ln units; higher is worse
+threshold = 0.5
+role = "advisory"
+
+[measures.peak_unintended_contact_force]  # N; higher is worse
+threshold = 5.0
+role = "advisory"
+
+[measures.min_clearance]          # m; lower is worse
+threshold = 0.01
+role = "advisory"
+
+[measures.hesitation_time]        # s; higher is worse
+threshold = 0.2
+role = "advisory"
+
+[measures.task_time]              # s, successful runs only; higher is worse
+threshold = 0.25
 role = "advisory"
 
 # [measures.task_score]    # example imported metric: needs a direction to count

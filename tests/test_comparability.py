@@ -26,6 +26,7 @@ def make_run(family: str, env_seed: int, **overrides: Any) -> dict[str, Any]:
         "physics_hash": "ph1",
         "success": True,
         "metrics": {"score": 1.0},
+        "has_timeseries": False,
     }
     fields.update(overrides)
     return fields
@@ -46,7 +47,6 @@ def make_batch(
             policy_version=policy_version,
             suite_ref=suite_ref,
             source="native",
-            has_timeseries=False,
             started_at=T0,
             **fields,
         )
@@ -205,6 +205,61 @@ def test_unknown_simulator_warns() -> None:
     result = check(base, cand, Config())
     assert rules_of(result) == {"simulator_version": "warn"}
     assert "baseline and candidate did not record it" in result.issues[0].message
+
+
+# --- sample_rate ----------------------------------------------------------------
+
+
+def ts_runs(rate: float | None) -> list[dict[str, Any]]:
+    return runs_for(STANDARD, has_timeseries=True, sample_rate_hz=rate)
+
+
+def test_same_sample_rate_passes() -> None:
+    result = check(make_batch(ts_runs(25.0)), make_batch(ts_runs(25.0)), Config())
+    assert result.issues == []
+
+
+def test_sample_rates_within_tolerance_pass() -> None:
+    result = check(make_batch(ts_runs(25.0)), make_batch(ts_runs(25.1)), Config())
+    assert result.issues == []
+
+
+def test_different_sample_rate_warns_without_blocking() -> None:
+    result = check(make_batch(ts_runs(25.0)), make_batch(ts_runs(50.0)), Config())
+    assert result.status == "comparable"
+    assert result.paired
+    assert rules_of(result) == {"sample_rate": "warn"}
+    assert "25 Hz" in result.issues[0].message
+    assert "50 Hz" in result.issues[0].message
+
+
+def test_sample_rate_rule_can_block() -> None:
+    result = check(
+        make_batch(ts_runs(25.0)), make_batch(ts_runs(50.0)), config(sample_rate="block")
+    )
+    assert result.status == "not_comparable"
+    assert rules_of(result) == {"sample_rate": "block"}
+
+
+def test_mixed_sample_rates_within_a_batch_are_reported() -> None:
+    cand = ts_runs(25.0)[:-1] + ts_runs(50.0)[-1:]
+    result = check(make_batch(ts_runs(25.0)), make_batch(cand), Config())
+    assert rules_of(result) == {"sample_rate": "warn"}
+
+
+def test_unknown_sample_rate_warns_even_when_configured_to_block() -> None:
+    result = check(
+        make_batch(ts_runs(None)), make_batch(ts_runs(25.0)), config(sample_rate="block")
+    )
+    assert result.status == "comparable"
+    assert rules_of(result) == {"sample_rate": "warn"}
+    assert "baseline" in result.issues[0].message
+
+
+def test_sample_rate_ignored_without_timeseries_on_both_sides() -> None:
+    summary_only = make_batch(runs_for(STANDARD))
+    assert check(summary_only, make_batch(ts_runs(50.0)), Config()).issues == []
+    assert check(summary_only, make_batch(runs_for(STANDARD)), Config()).issues == []
 
 
 # --- pairing ----------------------------------------------------------------------

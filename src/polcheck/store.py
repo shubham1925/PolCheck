@@ -10,6 +10,7 @@ rebuilds from them. Layout under the store root:
     batches/<batch_id>/runs.parquet     # summary rows, metrics as `metric.<name>` columns
     batches/<batch_id>/ts/<run_id>.parquet
     batches/<batch_id>/contacts/<run_id>.parquet
+    batches/<batch_id>/measures.parquet   # cached measure values, one column per name@version
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from polcheck.schema import Batch, BatchData, Run, SimulatorInfo, Suite
 from polcheck.suite import parse_suite, suite_hash
 
-INDEX_VERSION = 1
+INDEX_VERSION = 2
 METRIC_PREFIX = "metric."
 
 RUN_COLUMNS = pa.schema(
@@ -50,6 +51,7 @@ RUN_COLUMNS = pa.schema(
         ("failure_reason", pa.string()),
         ("source", pa.string()),
         ("has_timeseries", pa.bool_()),
+        ("sample_rate_hz", pa.float64()),
         ("started_at", pa.timestamp("us", tz="UTC")),
     ]
 )
@@ -91,6 +93,7 @@ CREATE TABLE runs (
     failure_reason VARCHAR,
     source VARCHAR NOT NULL,
     has_timeseries BOOLEAN NOT NULL,
+    sample_rate_hz DOUBLE,
     started_at TIMESTAMPTZ NOT NULL
 );
 CREATE TABLE baselines (suite_ref VARCHAR PRIMARY KEY, batch_id VARCHAR NOT NULL);
@@ -135,6 +138,7 @@ def runs_to_table(runs: Sequence[Run]) -> pa.Table:
         "failure_reason": pa.array([r.failure_reason for r in runs], pa.string()),
         "source": pa.array([r.source for r in runs], pa.string()),
         "has_timeseries": pa.array([r.has_timeseries for r in runs], pa.bool_()),
+        "sample_rate_hz": pa.array([r.sample_rate_hz for r in runs], pa.float64()),
         "started_at": pa.array([r.started_at for r in runs], RUN_COLUMNS.field("started_at").type),
     }
     for name in metric_names:
@@ -169,6 +173,7 @@ def table_to_runs(table: pa.Table) -> list[Run]:
                 metrics=metrics,
                 source=row["source"],
                 has_timeseries=row["has_timeseries"],
+                sample_rate_hz=row.get("sample_rate_hz"),  # absent in older batches
                 started_at=row["started_at"],
             )
         )
@@ -349,6 +354,14 @@ class Store:
     def read_contacts(self, batch_id: UUID, run_id: UUID) -> pa.Table | None:
         path = self.batch_dir(batch_id) / "contacts" / f"{run_id}.parquet"
         return pq.read_table(path) if path.is_file() else None
+
+    def read_measure_cache(self, batch_id: UUID) -> pa.Table | None:
+        path = self.batch_dir(batch_id) / "measures.parquet"
+        return pq.read_table(path) if path.is_file() else None
+
+    def write_measure_cache(self, batch_id: UUID, table: pa.Table) -> None:
+        """Replace the batch's measure cache. `runs.parquet` is never rewritten."""
+        _atomic_write_parquet(self.batch_dir(batch_id) / "measures.parquet", table)
 
     def _complete_batch_dirs(self) -> list[Path]:
         root = self.root / "batches"

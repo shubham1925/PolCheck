@@ -77,6 +77,7 @@ def test_recorded_values_read_back_identically(store: Store) -> None:
     assert {r.success for r in data.runs} == {True, False}
     assert all(r.has_timeseries and r.source == "native" for r in data.runs)
     assert all(r.simulator == SIM and r.physics_hash == "ph1" for r in data.runs)
+    assert all(r.sample_rate_hz == pytest.approx(25.0) for r in data.runs)
 
 
 def test_exception_records_failed_run(store: Store, caplog: pytest.LogCaptureFixture) -> None:
@@ -173,7 +174,23 @@ def test_run_without_signals(store: Store) -> None:
     batch_id = rec.close()
     (run_,) = store.read_batch(batch_id).runs
     assert not run_.has_timeseries
+    assert run_.sample_rate_hz is None
     assert store.read_timeseries(batch_id, run_.run_id) is None
+
+
+def test_sample_rate_is_the_median_step(store: Store) -> None:
+    rec = make_recorder(store)
+    scenario = rec.suite.scenarios[0]
+    with rec.run(scenario=scenario, env_seed=0) as run:
+        for t in (0.0, 0.02, 0.04, 0.10, 0.12):  # one dropped-frame gap
+            run.log(t=t, ee_pos=[0.0, 0.0, 0.0])
+        steady = run.finish(success=True)
+    with rec.run(scenario=scenario, env_seed=1) as run:
+        run.log(t=0.0, ee_pos=[0.0, 0.0, 0.0])
+        single = run.finish(success=True)
+    assert steady.sample_rate_hz == pytest.approx(50.0)
+    assert single.has_timeseries
+    assert single.sample_rate_hz is None
 
 
 def test_closed_recorder(store: Store) -> None:

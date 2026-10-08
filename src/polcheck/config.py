@@ -26,6 +26,7 @@ class RulesConfig(_Model):
     scenario_set: Severity = "warn"
     simulator_version: Severity = "warn"
     physics_hash: Severity = "block"
+    sample_rate: Severity = "warn"
 
 
 class MeasureConfig(_Model):
@@ -63,14 +64,17 @@ class Config(_Model):
     report_max_run_pages: int = Field(default=50, ge=0)
     rules: RulesConfig = Field(default_factory=RulesConfig)
     measures: dict[str, MeasureConfig] = Field(default_factory=dict)
+    """Per-measure overrides of threshold, role and direction, keyed by measure name."""
+    measure_paths: list[Path] = Field(default_factory=list)
+    """Python files defining custom measures with `@measure`."""
     readers: ReadersConfig = Field(default_factory=ReadersConfig)
 
 
 def load_config(path: Path | None = None) -> Config:
     """Load config from `path`, or from `./polcheck.toml` if it exists, else defaults.
 
-    A relative `store` is resolved against the config file's directory, so the
-    same file works from any working directory.
+    Relative `store` and `measure_paths` are resolved against the config file's
+    directory, so the same file works from any working directory.
     """
     if path is None:
         candidate = Path.cwd() / CONFIG_FILENAME
@@ -87,6 +91,10 @@ def load_config(path: Path | None = None) -> Config:
         config = Config.model_validate(data)
     except ValidationError as exc:
         raise ConfigError(f"{path}: {exc}") from exc
-    if not config.store.is_absolute():
-        config = config.model_copy(update={"store": path.parent / config.store})
-    return config
+    base = path.parent
+    return config.model_copy(
+        update={
+            "store": base / config.store,  # no-op for absolute paths
+            "measure_paths": [base / p for p in config.measure_paths],
+        }
+    )

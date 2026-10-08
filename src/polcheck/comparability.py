@@ -24,6 +24,9 @@ from polcheck.schema import (
 PAIRING_MIN_OVERLAP = 0.9
 """Share of `(scenario_id, env_seed)` keys that must match for a paired comparison."""
 
+SAMPLE_RATE_RTOL = 0.01
+"""Sampling rates within 1% of each other count as the same."""
+
 RunKey = tuple[str, int]
 
 
@@ -210,6 +213,63 @@ def _check_physics(base: BatchData, cand: BatchData, config: Config) -> list[Iss
     )
 
 
+def _rates_match(a: set[float], b: set[float]) -> bool:
+    """Every rate on each side is within SAMPLE_RATE_RTOL of one on the other."""
+
+    def covered(x: float, others: set[float]) -> bool:
+        return any(abs(x - y) <= SAMPLE_RATE_RTOL * max(x, y) for y in others)
+
+    return all(covered(x, b) for x in a) and all(covered(y, a) for y in b)
+
+
+def _fmt_rates(rates: set[float]) -> str:
+    return ", ".join(f"{r:.3g} Hz" for r in sorted(rates))
+
+
+def _check_sample_rate(base: BatchData, cand: BatchData, config: Config) -> list[Issue]:
+    """Time-series measures (smoothness, hesitation, ...) depend on the sampling
+    rate, so batches logged at different rates can differ with no change in
+    behaviour. Only runs with time-series take part: without them on both sides
+    there are no time-series measures to compare."""
+    sides = (("baseline", base), ("candidate", cand))
+    with_ts = {side: [r for r in data.runs if r.has_timeseries] for side, data in sides}
+    if not all(with_ts.values()):
+        return []
+    unknown = [
+        side for side, runs in with_ts.items() if any(r.sample_rate_hz is None for r in runs)
+    ]
+    if unknown:
+        return [
+            Issue(
+                rule="sample_rate",
+                severity="warn",
+                message=(
+                    "cannot verify that both batches logged time-series at the same rate: "
+                    f"the {' and '.join(unknown)} has runs without a recorded sampling rate "
+                    "(recorded before polcheck stored it, or with a single sample). "
+                    "Re-record to enable this check."
+                ),
+            )
+        ]
+    b = {r.sample_rate_hz for r in with_ts["baseline"] if r.sample_rate_hz is not None}
+    c = {r.sample_rate_hz for r in with_ts["candidate"] if r.sample_rate_hz is not None}
+    if _rates_match(b, c):
+        return []
+    return [
+        Issue(
+            rule="sample_rate",
+            severity=config.rules.sample_rate,
+            message=(
+                f"baseline time-series sampled at {_fmt_rates(b)}; candidate at "
+                f"{_fmt_rates(c)}. Measures computed from time-series (such as sparc, "
+                "log_dimensionless_jerk and hesitation_time) can change with the sampling "
+                "rate alone; success rate and imported metrics are unaffected. Re-record "
+                "one side at the same rate."
+            ),
+        )
+    ]
+
+
 # --- Pairing and sample sizes ----------------------------------------------
 
 
@@ -315,6 +375,7 @@ def check(
         *_check_scenario_set(base, cand, config, shared),
         *_check_simulator(base, cand, config),
         *_check_physics(base, cand, config),
+        *_check_sample_rate(base, cand, config),
     ]
 
     base_det, cand_det = _determinism(base), _determinism(cand)

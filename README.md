@@ -38,8 +38,7 @@ seeds = { start = 0, count = 50 }
 **2. Wrap your evaluation loop.** You write the part that reads your simulator's state (an "adapter"); polcheck only sees plain arrays. `demo/envs.py`'s `SignalLogger` is a worked example for MuJoCo.
 
 ```python
-from polcheck.recorder import Contact, Recorder
-from polcheck.schema import SimulatorInfo
+from polcheck import Contact, Recorder, SimulatorInfo
 
 rec = Recorder(
     ".polcheck",  # store directory, created if missing
@@ -63,11 +62,14 @@ for scenario in rec.suite.scenarios:
                     ee_quat=quat,
                     objects={"box": (box_pos, box_quat)},
                     clearance=min_dist,
+                    signals={"wrist_force": f},  # optional: your own sensors
                 )
                 run.log_contacts(t=t, contacts=[Contact("finger_l", "box", 3.2, True)])
             run.finish(
-                success=ok, failure_reason=None if ok else "timeout", metrics={"task_score": score}
-            )  # optional extra numbers you already have
+                success=ok,
+                failure_reason=None if ok else "timeout",
+                metrics={"task_score": score},  # optional extra numbers you already have
+            )
 
 batch_id = rec.close()
 ```
@@ -83,8 +85,9 @@ Signals you can log (all optional; leave out what you can't provide, and measure
 | `objects` | name → (pos 3, quat 4) | tracked objects, same conventions |
 | `clearance` | scalar | minimum distance from the robot to its surroundings, metres |
 | `qpos` | n | full MuJoCo state, only for replay video |
+| `signals` | name → scalar or 1-D array | your own signals, stored as `sig.<name>` for custom measures |
 
-Contacts are `Contact(geom_a, geom_b, force_norm, intended)`. Mark contacts the task requires (e.g. fingers on the object) as `intended=True`; the rest count as unintended contact.
+Contacts are `Contact(geom_a, geom_b, force_norm, intended)`. Mark contacts the task requires (e.g. fingers on the object) as `intended=True`; the rest count as unintended contact. Call `log_contacts` every step, with an empty list when nothing touches: that tells polcheck "no contact" (force 0) rather than "contacts not tracked" (measure skipped).
 
 Every step of a run must log the same signals. If your code raises inside a run, that run is stored as failed and the batch continues. To let polcheck compare seed-by-seed (more sensitive), re-run a few seeds within the batch so it can confirm your setup is deterministic (see `--repeat-check` in `demo/run_suite.py`).
 
@@ -97,6 +100,49 @@ uv run polcheck ingest results.csv --reader tabular --policy shelf-v14 --suite s
 ```
 
 CSV and JSONL work. Without time-series, only success rate and your own metric columns can be compared.
+
+### Measures
+
+A measure turns one run into one number. polcheck has six built-in per-run measures, plus success rate:
+
+| Measure | Worse when | Uses |
+|---|---|---|
+| `sparc` | lower (less smooth) | `t`, `ee_pos` |
+| `log_dimensionless_jerk` | higher (jerkier) | `t`, `ee_pos` |
+| `peak_unintended_contact_force` | higher (N) | contacts |
+| `min_clearance` | lower (m) | `clearance` |
+| `hesitation_time` | higher (s stalled below 1 cm/s) | `t`, `ee_pos` |
+| `task_time` | higher (s, successful runs only) | `t` |
+
+They exist for setups whose evaluation tool doesn't measure these things. If your runs already carry a metric with the same name (from `finish(metrics=...)` or a CSV column), polcheck uses your value instead. Thresholds (the smallest change that counts) and roles are set in `polcheck.toml`; see `polcheck.toml.example` for the defaults.
+
+To add your own, write a function and list its file in `polcheck.toml` as `measure_paths = ["my_measures.py"]`:
+
+```python
+from polcheck import RunData, measure
+
+
+@measure(
+    name="peak_wrist_force", worse="higher", threshold=5.0, unit="N", requires=["sig.wrist_force"]
+)
+def peak_wrist_force(run: RunData) -> float | None:
+    """Largest wrist force-sensor reading."""
+    return float(run.ts["sig.wrist_force"].max())
+```
+
+`run.ts["ee_pos"]` gives an n×3 array, `run.ts.t` the timestamps, `run.contacts` the contacts table and `run.scenario.config` the scenario settings. A run missing a signal in `requires` is skipped, not an error. Bump `version="2"` when you change a measure's definition so cached values are recomputed. Packages can also register measures through the `polcheck.measures` entry-point group.
+
+```sh
+uv run polcheck measures list   # every measure with its direction, threshold, role and source
+```
+
+Numbers you pass in `finish(metrics=...)` or import from a CSV are compared too, once `polcheck.toml` gives them a direction and threshold:
+
+```toml
+[measures.task_score]
+worse = "lower"
+threshold = 0.05
+```
 
 ### Then: compare
 
