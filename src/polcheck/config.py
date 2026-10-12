@@ -62,6 +62,8 @@ class Config(_Model):
     min_n_tail: int = Field(default=100, ge=1)
     bootstrap_resamples: int = Field(default=10_000, ge=100)
     report_max_run_pages: int = Field(default=50, ge=0)
+    seed: int = Field(default=0, ge=0)
+    """Seeds every bootstrap, so the same two batches always give the same verdict."""
     rules: RulesConfig = Field(default_factory=RulesConfig)
     measures: dict[str, MeasureConfig] = Field(default_factory=dict)
     """Per-measure overrides of threshold, role and direction, keyed by measure name."""

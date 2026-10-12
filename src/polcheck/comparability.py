@@ -226,15 +226,19 @@ def _fmt_rates(rates: set[float]) -> str:
     return ", ".join(f"{r:.3g} Hz" for r in sorted(rates))
 
 
-def _check_sample_rate(base: BatchData, cand: BatchData, config: Config) -> list[Issue]:
-    """Time-series measures (smoothness, hesitation, ...) depend on the sampling
+def _check_sample_rate(
+    base: BatchData, cand: BatchData, config: Config
+) -> tuple[list[Issue], float | None]:
+    """Issues, plus the common (lowest) rate when the two sides' rates differ.
+
+    Time-series measures (smoothness, hesitation, ...) depend on the sampling
     rate, so batches logged at different rates can differ with no change in
     behaviour. Only runs with time-series take part: without them on both sides
     there are no time-series measures to compare."""
     sides = (("baseline", base), ("candidate", cand))
     with_ts = {side: [r for r in data.runs if r.has_timeseries] for side, data in sides}
     if not all(with_ts.values()):
-        return []
+        return [], None
     unknown = [
         side for side, runs in with_ts.items() if any(r.sample_rate_hz is None for r in runs)
     ]
@@ -250,11 +254,12 @@ def _check_sample_rate(base: BatchData, cand: BatchData, config: Config) -> list
                     "Re-record to enable this check."
                 ),
             )
-        ]
+        ], None
     b = {r.sample_rate_hz for r in with_ts["baseline"] if r.sample_rate_hz is not None}
     c = {r.sample_rate_hz for r in with_ts["candidate"] if r.sample_rate_hz is not None}
     if _rates_match(b, c):
-        return []
+        return [], None
+    common = min(b | c)
     return [
         Issue(
             rule="sample_rate",
@@ -263,11 +268,13 @@ def _check_sample_rate(base: BatchData, cand: BatchData, config: Config) -> list
                 f"baseline time-series sampled at {_fmt_rates(b)}; candidate at "
                 f"{_fmt_rates(c)}. Measures computed from time-series (such as sparc, "
                 "log_dimensionless_jerk and hesitation_time) can change with the sampling "
-                "rate alone; success rate and imported metrics are unaffected. Re-record "
-                "one side at the same rate."
+                f"rate alone, so they are compared after resampling both sides to {common:.3g} Hz "
+                "and reported as info-only: shown, but they cannot change the verdict. "
+                "Success rate and imported metrics are unaffected. Record both sides at "
+                "the same rate to make these measures count again."
             ),
         )
-    ]
+    ], common
 
 
 # --- Pairing and sample sizes ----------------------------------------------
@@ -370,12 +377,13 @@ def check(
     cand_ids = {r.scenario_id for r in cand.runs}
     shared = base_ids & cand_ids
 
+    rate_issues, common_rate = _check_sample_rate(base, cand, config)
     issues = [
         *_check_suite_ref(base, cand, config),
         *_check_scenario_set(base, cand, config, shared),
         *_check_simulator(base, cand, config),
         *_check_physics(base, cand, config),
-        *_check_sample_rate(base, cand, config),
+        *rate_issues,
     ]
 
     base_det, cand_det = _determinism(base), _determinism(cand)
@@ -411,5 +419,6 @@ def check(
         shared_scenarios=sorted(shared),
         families=families,
         low_n_families=low_n,
+        common_sample_rate_hz=None if status == "not_comparable" else common_rate,
         issues=issues,
     )

@@ -111,6 +111,7 @@ def hesitation_time(run: RunData) -> float | None:
     unit="s",
     requires=["t"],
     success_only=True,
+    rate_sensitive=False,  # a duration moves by at most one time step
 )
 def task_time(run: RunData) -> float | None:
     """Duration of a successful run."""

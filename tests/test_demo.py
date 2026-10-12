@@ -157,3 +157,27 @@ def test_builtin_measures_on_recorded_runs(store: Store) -> None:
     successes = sum(r.success for r in data.runs)
     assert len(results["task_time"].defined()) == successes
     assert results["final_goal_distance"].origin == "imported"  # recorded via finish(metrics=)
+
+
+def test_end_to_end_compare_on_recorded_batches(store: Store) -> None:
+    """M4 acceptance: comparing recorded demo batches produces a saved comparison."""
+    from polcheck.compare import compare, exit_code
+
+    def record(version: str, policy: ScriptedPick) -> BatchData:
+        batch_id = run_suite(policy, version, store=store, seeds_per_family=20, repeat_check=4)
+        return store.read_batch(batch_id)
+
+    config = Config(bootstrap_resamples=1000)
+    base = record("v1", ScriptedPick())
+    same = compare(store, base, record("v1-again", ScriptedPick()), config)
+    assert same.paired  # the repeat check proved determinism
+    assert same.verdict == "PASS"
+    assert all(t.n_base <= 20 for t in same.tests if t.family != "(all)")  # repeats counted once
+
+    weak = compare(store, base, record("v2-weak", ScriptedPick(grasp_height=0.04)), config)
+    assert weak.verdict == "REGRESSED"
+    assert exit_code(weak) == 1
+    regressed = {t.measure for t in weak.tests if t.verdict == "REGRESSED"}
+    assert "success_rate" in regressed
+    assert store.read_comparison(weak.comparison_id) == weak
+    assert len(store.query("SELECT * FROM comparisons")) == 2

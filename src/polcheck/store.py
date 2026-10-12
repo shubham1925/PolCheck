@@ -11,6 +11,7 @@ rebuilds from them. Layout under the store root:
     batches/<batch_id>/ts/<run_id>.parquet
     batches/<batch_id>/contacts/<run_id>.parquet
     batches/<batch_id>/measures.parquet   # cached measure values, one column per name@version
+    comparisons/<comparison_id>.json      # saved comparison results
 """
 
 from __future__ import annotations
@@ -28,10 +29,10 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from pydantic import BaseModel, ConfigDict, Field
 
-from polcheck.schema import Batch, BatchData, Run, SimulatorInfo, Suite
+from polcheck.schema import Batch, BatchData, Comparison, Run, SimulatorInfo, Suite
 from polcheck.suite import parse_suite, suite_hash
 
-INDEX_VERSION = 2
+INDEX_VERSION = 3
 METRIC_PREFIX = "metric."
 
 RUN_COLUMNS = pa.schema(
@@ -97,6 +98,16 @@ CREATE TABLE runs (
     started_at TIMESTAMPTZ NOT NULL
 );
 CREATE TABLE baselines (suite_ref VARCHAR PRIMARY KEY, batch_id VARCHAR NOT NULL);
+CREATE TABLE comparisons (
+    comparison_id VARCHAR PRIMARY KEY,
+    created_at TIMESTAMP NOT NULL,  -- UTC
+    baseline_batch VARCHAR NOT NULL,
+    candidate_batch VARCHAR NOT NULL,
+    baseline_policy VARCHAR NOT NULL,
+    candidate_policy VARCHAR NOT NULL,
+    suite_ref VARCHAR NOT NULL,
+    verdict VARCHAR  -- NULL when the batches were not comparable
+);
 """
 
 
@@ -363,6 +374,33 @@ class Store:
         """Replace the batch's measure cache. `runs.parquet` is never rewritten."""
         _atomic_write_parquet(self.batch_dir(batch_id) / "measures.parquet", table)
 
+    # comparisons
+
+    def _comparison_path(self, comparison_id: UUID) -> Path:
+        return self.root / "comparisons" / f"{comparison_id}.json"
+
+    def write_comparison(self, comparison: Comparison) -> Path:
+        path = self._comparison_path(comparison.comparison_id)
+        _atomic_write_text(path, comparison.model_dump_json(indent=2))
+        with self._index() as con:
+            exists = con.execute(
+                "SELECT 1 FROM comparisons WHERE comparison_id = ?",
+                [str(comparison.comparison_id)],
+            ).fetchone()
+            if exists is None:  # a rebuild triggered by _index() may have added it already
+                _index_comparison(con, comparison)
+        return path
+
+    def read_comparison(self, comparison_id: UUID) -> Comparison:
+        path = self._comparison_path(comparison_id)
+        if not path.is_file():
+            raise StoreError(f"no comparison {comparison_id} in {self.root}")
+        return Comparison.model_validate_json(path.read_text(encoding="utf-8"))
+
+    def _comparison_files(self) -> list[Path]:
+        root = self.root / "comparisons"
+        return sorted(root.glob("*.json")) if root.is_dir() else []
+
     def _complete_batch_dirs(self) -> list[Path]:
         root = self.root / "batches"
         if not root.is_dir():
@@ -389,6 +427,10 @@ class Store:
                 _index_batch(con, directory, batch)
             for suite_ref, batch_id in self._read_baselines().baselines.items():
                 con.execute("INSERT INTO baselines VALUES (?, ?)", [suite_ref, str(batch_id)])
+            for path in self._comparison_files():
+                _index_comparison(
+                    con, Comparison.model_validate_json(path.read_text(encoding="utf-8"))
+                )
         finally:
             con.close()
         os.replace(tmp, self.index_path)
@@ -473,4 +515,20 @@ def _index_batch(con: duckdb.DuckDBPyConnection, directory: Path, batch: Batch) 
             con.execute(f"ALTER TABLE runs ADD COLUMN IF NOT EXISTS {_sql_ident(name)} DOUBLE")
     con.execute(
         f"INSERT INTO runs BY NAME SELECT * FROM read_parquet({_sql_str(runs_path.as_posix())})"
+    )
+
+
+def _index_comparison(con: duckdb.DuckDBPyConnection, comparison: Comparison) -> None:
+    con.execute(
+        "INSERT INTO comparisons VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+            str(comparison.comparison_id),
+            _to_utc_naive(comparison.created_at),
+            str(comparison.baseline.batch_id),
+            str(comparison.candidate.batch_id),
+            comparison.baseline.policy_version,
+            comparison.candidate.policy_version,
+            comparison.candidate.suite_ref,
+            comparison.verdict,
+        ],
     )

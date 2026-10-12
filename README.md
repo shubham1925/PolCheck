@@ -146,7 +146,29 @@ threshold = 0.05
 
 ### Then: compare
 
-Comparing a candidate batch against a baseline (`polcheck compare`) is not built yet; it arrives in milestones M4 (statistics) and M7 (CLI and reports).
+```sh
+uv run polcheck compare --baseline shelf-v13 --candidate shelf-v14
+```
+
+Each side is a batch id or a policy version (its most recent batch). The command checks that the two batches are comparable, runs every test, prints a table with the worst results first, and saves the full result under `.polcheck/comparisons/`. Its exit code is the verdict, so it can gate a CI job:
+
+| Exit code | Verdict | Meaning |
+|---|---|---|
+| 0 | `PASS` | no meaningful drop on any measure |
+| 1 | `REGRESSED` | a real drop, at least as large as the measure's threshold |
+| 2 | `INCONCLUSIVE` | not enough evidence on a gate measure; more runs needed (`--inconclusive-exit 0` to not fail on this) |
+| 3 | not comparable | e.g. different suite or physics settings |
+| 4 | error | bad arguments, missing batch, or an internal error |
+
+A test is `REGRESSED` only if the change is statistically real, its confidence interval excludes zero, and the estimated change is at least the threshold. It is `PASS` only if the whole interval is below the threshold. Only measures with `role = "gate"` (success rate by default) can make the overall verdict `INCONCLUSIVE`; the others can flag a regression but never block on missing evidence.
+
+Things that make comparisons sharper:
+
+- **Same seeds on both sides, and a deterministic setup.** polcheck then compares seed by seed, which detects much smaller changes. It confirms determinism from a few repeated seeds inside each batch; if you know your setup is deterministic and did not record repeats, pass `--assume-deterministic`.
+- **Enough runs.** Families with fewer than `min_n` (20) runs per side are `INCONCLUSIVE`, and inconclusive success-rate tests say roughly how many more runs they need.
+- **The same logging rate.** If the two batches recorded time-series at different rates, smoothness, jerk and hesitation are compared after resampling and shown as info-only: visible, but unable to change the verdict.
+
+The statistical methods are explained in plain language in [stats-explained/](stats-explained/README.md). Markdown, JUnit and HTML reports, baseline management and export/import for CI arrive in later milestones.
 
 ## Demo (MuJoCo)
 

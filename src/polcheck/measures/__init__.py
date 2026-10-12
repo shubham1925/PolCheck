@@ -32,14 +32,13 @@ import pyarrow as pa
 from numpy.typing import NDArray
 
 from polcheck.config import Config
-from polcheck.schema import Run, Scenario
+from polcheck.schema import Role, Run, Scenario
 
 ENTRY_POINT_GROUP = "polcheck.measures"
 CONTACTS = "contacts"
 """Special `requires` entry: the run must have a contacts table (possibly empty)."""
 
 Worse = Literal["higher", "lower"]
-Role = Literal["gate", "advisory"]
 Kind = Literal["success_rate", "per_run", "imported"]
 Source = Literal["builtin", "entry_point", "file", "imported"]
 
@@ -130,6 +129,10 @@ class MeasureSpec:
     requires: tuple[str, ...] = ()
     version: str = "1"
     """Bump when the definition changes, so cached values are recomputed."""
+    rate_sensitive: bool = False
+    """Its value can change with the time-series logging rate alone. When two
+    batches were logged at different rates, such measures are computed on
+    resampled data and their tests are info-only (DECISIONS.md D31)."""
     func: MeasureFunc | None = None
     source: Source = "builtin"
     origin: str = ""
@@ -144,6 +147,13 @@ class MeasureSpec:
     @property
     def cache_key(self) -> str:
         return f"{self.name}@{self.version}"
+
+    def cache_key_at(self, resample_hz: float | None) -> str:
+        """Cache column for values computed on data resampled to `resample_hz`,
+        kept apart from full-rate values."""
+        if resample_hz is None or not self.rate_sensitive:
+            return self.cache_key
+        return f"{self.cache_key}@{resample_hz:g}Hz"
 
 
 def _check_threshold(name: str, threshold: float | None) -> None:
@@ -161,12 +171,17 @@ def measure(
     role: Role = "advisory",
     success_only: bool = False,
     version: str = "1",
+    rate_sensitive: bool | None = None,
 ) -> Callable[[MeasureFunc], MeasureFunc]:
     """Declare a per-run measure.
 
     The function receives a `RunData` and returns a float, or None when the
     measure is undefined for that run. It is only called when every signal in
     `requires` is present (use `"contacts"` to require a contacts table).
+
+    `rate_sensitive` says whether the value depends on the logging rate; it
+    defaults to true for any measure that requires a signal or contacts. Set it
+    to False for measures such as a duration that barely move with the rate.
     """
     if not _NAME.match(name):
         raise MeasureError(
@@ -190,6 +205,7 @@ def measure(
             success_only=success_only,
             requires=tuple(requires),
             version=str(version),
+            rate_sensitive=bool(tuple(requires)) if rate_sensitive is None else rate_sensitive,
             func=func,
             description=(func.__doc__ or "").strip().split("\n")[0],
         )

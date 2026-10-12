@@ -8,6 +8,7 @@ min_n = 20                 # runs per family per side below which a family is IN
 min_n_tail = 100           # runs per family per side needed for a per-family p95 test
 bootstrap_resamples = 10000
 report_max_run_pages = 50
+seed = 0                   # bootstrap seed: the same batches always give the same verdict
 measure_paths = []         # Python files with custom @measure functions, e.g. ["my_measures.py"]
 
 [rules]                    # comparability rule severities: "warn" or "block"

@@ -1854,7 +1854,7 @@ requires-dist = [
     { name = "polcheck", extras = ["demo"], marker = "extra == 'train'" },
     { name = "pyarrow", specifier = ">=15" },
     { name = "pydantic", specifier = ">=2.7" },
-    { name = "scipy", specifier = ">=1.11" },
+    { name = "scipy", specifier = ">=1.15" },
     { name = "stable-baselines3", marker = "extra == 'train'", specifier = ">=2.3" },
     { name = "typer", specifier = ">=0.12" },
 ]

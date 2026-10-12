@@ -41,6 +41,10 @@ Severity = Literal["warn", "block"]
 
 ComparabilityStatus = Literal["comparable", "partial", "not_comparable"]
 
+Verdict = Literal["PASS", "REGRESSED", "INCONCLUSIVE"]
+
+Role = Literal["gate", "advisory"]
+
 UNKNOWN = "unknown"
 """Simulator name/version or physics hash that the source did not record."""
 
@@ -208,4 +212,79 @@ class ComparabilityResult(_Model):
     """Run counts per family over the shared scenarios, one entry per family."""
     low_n_families: list[str]
     """Families below `min_n` on either side; M4 reports these as INCONCLUSIVE."""
+    common_sample_rate_hz: float | None = None
+    """Set when the batches' time-series were logged at different rates: the
+    lowest rate on either side, which rate-sensitive measures are resampled to."""
     issues: list[Issue]
+
+
+# --- 7.5 Test results and 7.6 comparison -------------------------------------
+
+ALL_FAMILIES = "(all)"
+"""`TestResult.family` for a test pooled over every family."""
+
+
+class TestResult(_Model):
+    """One statistical test. Estimates and intervals are oriented so that a
+    positive value means the candidate is worse."""
+
+    __test__ = False  # not a pytest test class, despite the name
+
+    family: str
+    measure: str
+    """Measure name; `<name>.p95` for a tail test."""
+    n_base: int
+    n_cand: int
+    """Runs used on each side (in a paired test, the matched pairs)."""
+    base_value: float | None
+    cand_value: float | None
+    """The measure on each side in its own units and sign: a success rate, a
+    mean, or the bad-tail percentile."""
+    estimate: float | None
+    ci_low: float | None
+    ci_high: float | None
+    p_value: float | None
+    p_adjusted: float | None
+    """None when there were too few runs to test at all."""
+    threshold: float
+    role: Role
+    verdict: Verdict
+    method: str
+    info_only: bool = False
+    """Shown in reports but excluded from the overall verdict and exit code."""
+    notes: list[str] = Field(default_factory=list)
+    runs_needed: int | None = None
+    """For an INCONCLUSIVE success-rate test: estimated extra runs per side."""
+
+
+class MeasureNote(_Model):
+    """A measure that was not tested, and why."""
+
+    measure: str
+    status: Literal["skipped", "unconfigured"]
+    reason: str
+
+
+class ComparisonSettings(_Model):
+    alpha: float
+    fdr_q: float
+    min_n: int
+    min_n_tail: int
+    bootstrap_resamples: int
+    seed: int
+    assume_deterministic: bool
+
+
+class Comparison(_Model):
+    comparison_id: UUID
+    created_at: AwareDatetime
+    baseline: Batch
+    candidate: Batch
+    comparability: ComparabilityResult
+    verdict: Verdict | None
+    """None when the batches were not comparable (exit code 3)."""
+    paired: bool
+    tests: list[TestResult] = Field(default_factory=list)
+    not_tested: list[MeasureNote] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+    settings: ComparisonSettings
